@@ -7,13 +7,19 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- AutoTable for jsPDF (proper tables in PDF) -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    .btn { @apply px-4 py-2 rounded-lg border hover:bg-gray-100 transition; }
+    .card { @apply bg-white p-6 rounded-xl shadow; }
+  </style>
 </head>
 
 <body class="bg-gray-50 text-gray-800">
-  <div id="app" class="max-w-6xl mx-auto p-6">
+  <div id="appRoot" class="max-w-6xl mx-auto p-6">
     <h1 class="text-3xl font-bold mb-4">📋 Generator Ofert</h1>
 
-    <div class="bg-white p-6 rounded-xl shadow mb-6">
+    <div class="card mb-6">
       <h2 class="font-semibold text-lg mb-3">1️⃣ Wybierz język</h2>
       <select id="langSelect" class="border rounded-lg p-2">
         <option value="PL">Polski</option>
@@ -21,27 +27,32 @@
         <option value="RO">Română</option>
         <option value="CS">Čeština</option>
       </select>
+      <span id="langStatus" class="ml-3 text-sm text-gray-500"></span>
     </div>
 
-    <div class="bg-white p-6 rounded-xl shadow mb-6">
+    <div class="card mb-6">
       <h2 class="font-semibold text-lg mb-3">2️⃣ Wybierz sieć</h2>
       <div id="networks" class="flex flex-wrap gap-3"></div>
       <div id="offerInfo" class="mt-4 text-green-700 font-semibold"></div>
     </div>
 
-    <div class="bg-white p-6 rounded-xl shadow mb-6">
+    <div class="card mb-6">
       <h2 class="font-semibold text-lg mb-3">3️⃣ Kolumny w ofercie</h2>
       <div id="columns" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
     </div>
 
-    <div class="bg-white p-6 rounded-xl shadow mb-6">
+    <div class="card mb-6">
       <h2 class="font-semibold text-lg mb-3">4️⃣ Dodaj produkty</h2>
       <textarea id="symbolsInput" placeholder="Wklej symbole (po jednym w linii)" class="border w-full rounded-lg p-3 h-32 mb-3"></textarea>
-      <button id="addSymbolsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Dodaj produkty</button>
+      <div class="flex items-center gap-3 mb-3">
+        <button id="addSymbolsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Dodaj produkty</button>
+        <button id="clearBtn" class="px-4 py-2 rounded-lg border hover:bg-gray-100">Wyczyść</button>
+      </div>
+      <div id="notFound" class="text-sm text-red-600"></div>
       <div id="productList" class="mt-4"></div>
     </div>
 
-    <div class="bg-white p-6 rounded-xl shadow">
+    <div class="card">
       <h2 class="font-semibold text-lg mb-3">5️⃣ Generuj ofertę</h2>
       <div class="flex gap-3">
         <button id="pdfBtn" class="flex-1 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700">📄 PDF</button>
@@ -49,17 +60,20 @@
       </div>
     </div>
 
-    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v1.0 • Netlify edition</p>
+    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v1.1 • Netlify edition</p>
   </div>
 
   <script>
+    // ====== CONFIG ======
     const SHEET_ID = '1R3CKABzIXSacr6A5nLmf_DZT9RtfdUVBKZTZNgCG4Zo';
     const API_KEY = 'AIzaSyASZbTomz-sao5jmw9frcWttnS1FvPwky0';
 
+    // ====== APP STATE ======
     const app = {
       products: [],
       selectedProducts: [],
       selectedNetwork: null,
+      selectedNetworkColor: '#22c55e',
       offerNumber: '',
       columns: {
         symbol: true,
@@ -69,114 +83,238 @@
         technical: false,
         complementary: true,
         priceNet: true,
-        priceNetNet: false
-      }
+        priceNetNet: false,
+      },
     };
 
-    // Ładowanie sieci
-    async function loadNetworks() {
-      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sieci?key=${API_KEY}`);
-      const data = await res.json();
-      const container = document.getElementById("networks");
-      data.values.slice(1).forEach(row => {
-        const btn = document.createElement("button");
-        btn.textContent = row[1];
-        btn.className = "px-4 py-2 rounded-lg border hover:bg-gray-100";
-        btn.style.borderColor = row[2];
-        btn.onclick = () => selectNetwork(row[1], row[2]);
-        container.appendChild(btn);
-      });
+    // Column labels (order matters)
+    const COLUMN_DEFS = {
+      symbol: 'Symbol',
+      ean: 'EAN',
+      name: 'Nazwa',
+      features: 'Cechy',
+      technical: 'Dane techniczne',
+      complementary: 'Komplementacja',
+      priceNet: 'Cena Netto',
+      priceNetNet: 'Cena NetNet',
+    };
+
+    // ====== HELPERS ======
+    const byId = (id) => document.getElementById(id);
+
+    function yyyymmdd(date = new Date()) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}${m}${d}`;
+    }
+
+    function ensureLoadedOrToast(condition, message) {
+      if (!condition) {
+        alert(message);
+        return false;
+      }
+      return true;
+    }
+
+    function selectedColumnKeys() {
+      return Object.keys(app.columns).filter((k) => app.columns[k]);
     }
 
     function selectNetwork(name, color) {
       app.selectedNetwork = name;
-      app.offerNumber = `${name}/1/${new Date().toLocaleDateString('pl-PL').replaceAll('.', '')}`;
-      document.getElementById("offerInfo").innerHTML =
-        `Sieć: <b style="color:${color}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`;
-    }
-
-    // Ładowanie produktów
-    async function loadProducts(lang = "PL") {
-      const sheetName = `Produkty_${lang}`;
-      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${sheetName}?key=${API_KEY}`);
-      const data = await res.json();
-      if (!data.values) return alert("Brak danych produktów");
-      const [header, ...rows] = data.values;
-      app.products = rows.map(r => ({
-        symbol: r[0],
-        ean: r[1],
-        name: r[2],
-        features: r[3],
-        technical: r[4],
-        complementary: r[5],
-        priceNet: r[6],
-        priceNetNet: r[7]
-      }));
-    }
-
-    function setupColumns() {
-      const cols = {
-        symbol: "Symbol",
-        ean: "EAN",
-        name: "Nazwa",
-        features: "Cechy",
-        technical: "Dane techniczne",
-        complementary: "Komplementacja",
-        priceNet: "Cena Netto",
-        priceNetNet: "Cena NetNet"
-      };
-      const container = document.getElementById("columns");
-      Object.entries(cols).forEach(([key, label]) => {
-        const div = document.createElement("div");
-        div.className = "flex items-center space-x-2";
-        div.innerHTML = `<input type="checkbox" id="${key}" ${app.columns[key] ? 'checked' : ''} class="w-4 h-4 text-blue-600"><label for="${key}">${label}</label>`;
-        container.appendChild(div);
-        div.querySelector("input").addEventListener("change", e => app.columns[key] = e.target.checked);
-      });
-    }
-
-    function addProducts() {
-      const symbols = document.getElementById("symbolsInput").value.split(/[\n,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
-      app.selectedProducts = app.products.filter(p => symbols.includes(p.symbol));
-      renderProducts();
+      app.selectedNetworkColor = color || '#22c55e';
+      app.offerNumber = `${name}/1/${yyyymmdd()}`;
+      byId('offerInfo').innerHTML = `Sieć: <b style="color:${app.selectedNetworkColor}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`;
     }
 
     function renderProducts() {
-      const div = document.getElementById("productList");
-      div.innerHTML = app.selectedProducts.map(p => `<div class='p-2 border-b flex justify-between'><span><b>${p.symbol}</b> - ${p.name}</span><span>${p.priceNet || ''} zł</span></div>`).join('');
+      const container = byId('productList');
+      if (app.selectedProducts.length === 0) {
+        container.innerHTML = '<div class="text-sm text-gray-500">Brak produktów w ofercie.</div>';
+        return;
+      }
+      container.innerHTML = app.selectedProducts
+        .map((p) => {
+          const price = p.priceNet ? `${p.priceNet} zł` : '';
+          return `<div class='p-2 border-b flex justify-between items-start gap-4'>
+            <span><b>${p.symbol}</b> — ${p.name || ''}</span>
+            <span class="whitespace-nowrap">${price}</span>
+          </div>`;
+        })
+        .join('');
+    }
+
+    function addProducts() {
+      const raw = byId('symbolsInput').value;
+      const symbols = Array.from(new Set(
+        raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).map((s) => s.toUpperCase())
+      ));
+      const found = [];
+      const missing = [];
+      symbols.forEach((sym) => {
+        const hit = app.products.find((p) => (p.symbol || '').toUpperCase() === sym);
+        if (hit) found.push(hit); else missing.push(sym);
+      });
+      app.selectedProducts = found;
+      byId('notFound').textContent = missing.length ? `Nie znaleziono: ${missing.join(', ')}` : '';
+      renderProducts();
+    }
+
+    function setupColumns() {
+      const container = byId('columns');
+      container.innerHTML = '';
+      Object.entries(COLUMN_DEFS).forEach(([key, label]) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'flex items-center space-x-2';
+        wrap.innerHTML = `
+          <input type="checkbox" id="col_${key}" class="w-4 h-4" ${app.columns[key] ? 'checked' : ''}>
+          <label for="col_${key}">${label}</label>
+        `;
+        container.appendChild(wrap);
+        wrap.querySelector('input').addEventListener('change', (e) => {
+          app.columns[key] = e.target.checked;
+        });
+      });
+    }
+
+    // ====== LOADERS ======
+    async function loadNetworks() {
+      const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Sieci')}?key=${API_KEY}`;
+      try {
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        if (!data.values) throw new Error('Brak danych arkusza "Sieci"');
+        const [, ...rows] = data.values; // skip header
+        const container = byId('networks');
+        container.innerHTML = '';
+        rows.forEach((row) => {
+          const [id, displayName, color] = row; // adjust if your sheet differs
+          const btn = document.createElement('button');
+          btn.textContent = displayName || id || 'Sieć';
+          btn.className = 'btn';
+          btn.style.borderColor = color || '#e5e7eb';
+          btn.addEventListener('click', () => selectNetwork(displayName || id, color));
+          container.appendChild(btn);
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Nie udało się załadować listy sieci. Upewnij się, że arkusz jest publiczny.');
+      }
+    }
+
+    async function loadProducts(lang = 'PL') {
+      byId('langStatus').textContent = 'Ładowanie…';
+      const sheetName = `Produkty_${lang}`;
+      const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheetName)}?key=${API_KEY}`;
+      try {
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        if (!data.values) throw new Error('Brak danych produktów');
+        const [header, ...rows] = data.values;
+        // Expecting columns in this exact order; guard against missing cells
+        app.products = rows.map((r) => ({
+          symbol: r[0] || '',
+          ean: r[1] || '',
+          name: r[2] || '',
+          features: r[3] || '',
+          technical: r[4] || '',
+          complementary: r[5] || '',
+          priceNet: r[6] || '',
+          priceNetNet: r[7] || '',
+        }));
+        byId('langStatus').textContent = `Załadowano: ${app.products.length}`;
+        // Clear current selection when language changes
+        app.selectedProducts = [];
+        renderProducts();
+      } catch (err) {
+        console.error(err);
+        byId('langStatus').textContent = '';
+        alert('Nie udało się załadować produktów. Upewnij się, że arkusz i zakładka istnieją oraz są publiczne.');
+      }
+    }
+
+    // ====== EXPORTS ======
+    function buildTableData() {
+      const keys = selectedColumnKeys();
+      const head = keys.map((k) => COLUMN_DEFS[k]);
+      const body = app.selectedProducts.map((p) => keys.map((k) => p[k] ?? ''));
+      return { keys, head, body };
     }
 
     function generatePDF() {
+      if (!ensureLoadedOrToast(app.selectedNetwork, 'Wybierz najpierw sieć.')) return;
+      if (!ensureLoadedOrToast(app.selectedProducts.length, 'Dodaj co najmniej jeden produkt.')) return;
+
       const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: "landscape" });
+      const doc = new jsPDF({ orientation: 'landscape' });
+
       doc.setFontSize(16);
-      doc.text("Oferta handlowa", 14, 20);
-      doc.setFontSize(12);
-      doc.text(`Numer: ${app.offerNumber}`, 14, 30);
-      doc.text(`Sieć: ${app.selectedNetwork}`, 14, 38);
-      let y = 50;
-      app.selectedProducts.forEach(p => {
-        doc.text(`${p.symbol} - ${p.name} - ${p.priceNet} zł`, 14, y);
-        y += 8;
+      doc.text('Oferta handlowa', 14, 18);
+      doc.setFontSize(11);
+      doc.text(`Numer: ${app.offerNumber}`, 14, 26);
+      doc.text(`Sieć: ${app.selectedNetwork}`, 14, 32);
+
+      const { head, body } = buildTableData();
+      doc.autoTable({
+        head: [head],
+        body,
+        startY: 40,
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [234, 236, 239], textColor: 33 },
+        columnStyles: {
+          0: { cellWidth: 35 }, // Symbol
+          2: { cellWidth: 70 }, // Nazwa
+        },
+        didDrawPage: (data) => {
+          // footer with date
+          const str = `Wygenerowano: ${new Date().toLocaleString('pl-PL')}`;
+          doc.setFontSize(8);
+          doc.text(str, data.settings.margin.left, doc.internal.pageSize.getHeight() - 6);
+        },
       });
-      doc.save(`Oferta_${app.selectedNetwork}.pdf`);
+
+      const fname = `Oferta_${app.selectedNetwork || 'bez_sieci'}_${yyyymmdd()}.pdf`;
+      doc.save(fname);
     }
 
     function generateExcel() {
+      if (!ensureLoadedOrToast(app.selectedNetwork, 'Wybierz najpierw sieć.')) return;
+      if (!ensureLoadedOrToast(app.selectedProducts.length, 'Dodaj co najmniej jeden produkt.')) return;
+
+      const { keys, head, body } = buildTableData();
+      // Convert to array of objects with headers
+      const rowsAsObjects = body.map((row) => {
+        const obj = {};
+        row.forEach((val, i) => { obj[head[i]] = val; });
+        return obj;
+      });
+
       const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(app.selectedProducts);
-      XLSX.utils.book_append_sheet(wb, ws, "Oferta");
-      XLSX.writeFile(wb, `Oferta_${app.selectedNetwork}.xlsx`);
+      const ws = XLSX.utils.json_to_sheet(rowsAsObjects, { header: head });
+      // Auto width
+      const colWidths = head.map((h) => ({ wch: Math.max(h.length + 2, 12) }));
+      ws['!cols'] = colWidths;
+      XLSX.utils.book_append_sheet(wb, ws, 'Oferta');
+      const fname = `Oferta_${app.selectedNetwork || 'bez_sieci'}_${yyyymmdd()}.xlsx`;
+      XLSX.writeFile(wb, fname);
     }
 
-    document.getElementById("addSymbolsBtn").onclick = addProducts;
-    document.getElementById("pdfBtn").onclick = generatePDF;
-    document.getElementById("excelBtn").onclick = generateExcel;
-    document.getElementById("langSelect").onchange = (e) => loadProducts(e.target.value);
+    // ====== INIT ======
+    byId('addSymbolsBtn').addEventListener('click', addProducts);
+    byId('clearBtn').addEventListener('click', () => {
+      byId('symbolsInput').value = '';
+      byId('notFound').textContent = '';
+      app.selectedProducts = [];
+      renderProducts();
+    });
+    byId('pdfBtn').addEventListener('click', generatePDF);
+    byId('excelBtn').addEventListener('click', generateExcel);
+    byId('langSelect').addEventListener('change', (e) => loadProducts(e.target.value));
 
     setupColumns();
     loadNetworks();
-    loadProducts("PL");
+    loadProducts('PL');
   </script>
 </body>
 </html>
