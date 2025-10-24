@@ -43,7 +43,7 @@
 
     <div class="card mb-6">
       <h2 class="font-semibold text-lg mb-3">4️⃣ Dodaj produkty</h2>
-      <textarea id="symbolsInput" placeholder="Wklej symbole (po jednym w linii)" class="border w-full rounded-lg p-3 h-32 mb-3"></textarea>
+      <textarea id="symbolsInput" placeholder="Paste two columns copied from Excel: A = SYMBOL, B = PRICE (e.g. DED6593<TAB>123,00). Semicolon, comma or space separators also work." class="border w-full rounded-lg p-3 h-32 mb-3"></textarea>
       <div class="flex items-center gap-3 mb-3">
         <button id="addSymbolsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Dodaj produkty</button>
         <button id="clearBtn" class="px-4 py-2 rounded-lg border hover:bg-gray-100">Wyczyść</button>
@@ -147,17 +147,51 @@
 
     function addProducts() {
       const raw = byId('symbolsInput').value;
-      const symbols = Array.from(new Set(
-        raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).map((s) => s.toUpperCase())
-      ));
+      const lines = raw.split('
+').map(l => l.trim()).filter(Boolean);
+
+      // Parse lines into {sym, priceRaw}; prefer TAB from Excel
+      const pasted = lines.map(l => {
+        const tab = String.fromCharCode(9);
+        let parts = l.split(tab);
+        if (parts.length === 1) parts = l.split(';');
+        if (parts.length === 1) parts = l.split(',');
+        if (parts.length === 1) {
+          const ws = l.split(' ').filter(Boolean);
+          if (ws.length >= 2) parts = [ws[0], ws.slice(1).join(' ')];
+        }
+        const sym = (parts[0] || '').trim().toUpperCase();
+        const priceRaw = (parts[1] || '').trim();
+        return { sym, priceRaw };
+      });
+
+      const uniqueSyms = Array.from(new Set(pasted.map(p => p.sym).filter(Boolean)));
+      const priceBySym = new Map();
+      pasted.forEach(({ sym, priceRaw }) => { if (sym && priceRaw) priceBySym.set(sym, priceRaw); });
+
       const found = [];
       const missing = [];
-      symbols.forEach((sym) => {
-        const hit = app.products.find((p) => (p.symbol || '').toUpperCase() === sym);
-        if (hit) found.push(hit); else missing.push(sym);
+
+      uniqueSyms.forEach(sym => {
+        const hit = app.products.find(p => (p.symbol || '').toUpperCase() === sym);
+        if (hit) {
+          const cloned = { ...hit };
+          if (priceBySym.has(sym)) {
+            const rawVal = priceBySym.get(sym);
+            const normalized = rawVal.replaceAll(' ', '').replace(',', '.');
+            const num = Number(normalized);
+            cloned.priceNet = Number.isFinite(num) ? num : rawVal;
+          }
+          found.push(cloned);
+        } else {
+          missing.push(sym);
+        }
       });
+
       app.selectedProducts = found;
-      byId('notFound').textContent = missing.length ? `Nie znaleziono: ${missing.join(', ')}` : '';
+      const msg = missing.length ? `Nie znaleziono: ${missing.join(', ')}` : '';
+      byId('notFound').textContent = msg;
+      if (missing.length) alert(msg);
       renderProducts();
     }
 
