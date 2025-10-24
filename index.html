@@ -14,26 +14,31 @@
     <h1 class="text-3xl font-bold mb-4">📋 Generator Ofert</h1>
 
     <div class="bg-white p-6 rounded-xl shadow mb-6">
-      <h2 class="font-semibold text-lg mb-3">1️⃣ Wybierz sieć</h2>
+      <h2 class="font-semibold text-lg mb-3">1️⃣ Wybierz język</h2>
+      <select id="langSelect" class="border rounded-lg p-2">
+        <option value="PL">Polski</option>
+        <option value="EN">English</option>
+        <option value="RO">Română</option>
+        <option value="CS">Čeština</option>
+      </select>
+      <span id="langStatus" class="ml-3 text-sm text-gray-500"></span>
+    </div>
+
+    <div class="bg-white p-6 rounded-xl shadow mb-6">
+      <h2 class="font-semibold text-lg mb-3">2️⃣ Wybierz sieć</h2>
       <div id="networks" class="flex flex-wrap gap-3"></div>
       <div id="offerInfo" class="mt-4 text-green-700 font-semibold"></div>
     </div>
 
     <div class="bg-white p-6 rounded-xl shadow mb-6">
-      <h2 class="font-semibold text-lg mb-3">2️⃣ Kolumny w ofercie</h2>
+      <h2 class="font-semibold text-lg mb-3">3️⃣ Kolumny w ofercie</h2>
       <div id="columns" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
     </div>
 
     <div class="bg-white p-6 rounded-xl shadow mb-6">
-      <h2 class="font-semibold text-lg mb-3">3️⃣ Dodaj produkty</h2>
-      <p class="text-sm text-gray-600 mb-2">
-        Skopiuj DWIE kolumny z Excela: <b>A = Symbol</b>, <b>B = Cena</b>.
-        Działa <b>TAB</b> (Excel), <b>średnik ;</b>, <b>przecinek ,</b> oraz <b>spacja</b>
-        (np. <code>DED6608 299,00</code>). Ceny prezentowane jako <code>123,00</code>.
-      </p>
-      <textarea id="symbolsInput" class="border w-full rounded-lg p-3 h-32 mb-3" placeholder="Przykład wklejki:
-DED6608	299,00
-ABC123	129.99"></textarea>
+      <h2 class="font-semibold text-lg mb-3">4️⃣ Dodaj produkty</h2>
+      <p class="text-sm text-gray-600 mb-2">Kopiuj DWIE kolumny z Excela: <b>A = Symbol</b>, <b>B = Cena</b>. Działa <b>TAB</b> (z Excela), <b>średnik ;</b>, <b>przecinek ,</b> oraz <b>spacja</b> (np. <code>DED6608 299,00</code>).</p>
+      <textarea id="symbolsInput" class="border w-full rounded-lg p-3 h-32 mb-3" placeholder="Przykład wklejki:\nDED6608\t299,00\nABC123\t129.99"></textarea>
       <div class="flex items-center gap-3 mb-3">
         <button id="addSymbolsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Dodaj produkty</button>
         <button id="clearBtn" class="px-4 py-2 rounded-lg border hover:bg-gray-100">Wyczyść</button>
@@ -43,22 +48,20 @@ ABC123	129.99"></textarea>
     </div>
 
     <div class="bg-white p-6 rounded-xl shadow">
-      <h2 class="font-semibold text-lg mb-3">4️⃣ Generuj ofertę</h2>
+      <h2 class="font-semibold text-lg mb-3">5️⃣ Generuj ofertę</h2>
       <div class="flex gap-3">
         <button id="pdfBtn" class="flex-1 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700">📄 PDF</button>
         <button id="excelBtn" class="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700">📊 Excel</button>
       </div>
     </div>
 
-    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v2.0 — PL-only, wklejanie 2 kolumn, ceny 123,00</p>
+    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v1.3 — robust paste</p>
   </div>
 
 <script>
-  // ===== CONFIG =====
   const SHEET_ID = '1R3CKABzIXSacr6A5nLmf_DZT9RtfdUVBKZTZNgCG4Zo';
-  const API_KEY  = 'AIzaSyASZbTomz-sao5jmw9frcWttnS1FvPwky0';
+  const API_KEY = 'AIzaSyASZbTomz-sao5jmw9frcWttnS1FvPwky0';
 
-  // ===== STATE =====
   const app = {
     products: [],
     selectedProducts: [],
@@ -76,15 +79,13 @@ ABC123	129.99"></textarea>
     priceNet: 'Cena Netto', priceNetNet: 'Cena NetNet'
   };
 
-  // ===== HELPERS =====
   const byId = (id) => document.getElementById(id);
   const yyyymmdd = (d=new Date()) => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 
   function selectNetwork(name, color) {
     app.selectedNetwork = name;
     app.offerNumber = `${name}/1/${yyyymmdd()}`;
-    byId('offerInfo').innerHTML =
-      `Sieć: <b style="color:${color||'#22c55e'}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`;
+    byId('offerInfo').innerHTML = `Sieć: <b style="color:${color||'#22c55e'}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`;
   }
 
   function setupColumns() {
@@ -98,45 +99,49 @@ ABC123	129.99"></textarea>
     });
   }
 
-  // ===== PARSING PASTED LINES =====
+  // ---------- robust line parser ----------
   function splitSymbolPrice(line) {
     const TAB='\t';
-    if (line.includes(TAB)) { const [a,...r]=line.split(TAB); return [a, r.join(TAB)]; }
-    if (line.includes(';')) { const [a,...r]=line.split(';'); return [a, r.join(';')]; }
+    // Prefer TAB (Excel)
+    if (line.includes(TAB)) {
+      const [a, ...rest] = line.split(TAB);
+      return [a, rest.join(TAB)];
+    }
+    // Then semicolon
+    if (line.includes(';')) {
+      const [a, ...rest] = line.split(';');
+      return [a, rest.join(';')];
+    }
+    // Then whitespace: first token = symbol, rest = price (allows decimal comma)
     const m = line.match(/^(\S+)\s+(.+)$/);
     if (m) return [m[1], m[2]];
-    if (!/\s/.test(line) && line.includes(',')) { const i=line.indexOf(','); return [line.slice(0,i), line.slice(i+1)]; }
+    // Finally, comma split if no whitespace (rare)
+    if (!/\s/.test(line) && line.includes(',')) {
+      const i = line.indexOf(',');
+      return [line.slice(0, i), line.slice(i+1)];
+    }
+    // give up -> whole line as symbol
     return [line, ''];
   }
 
   function normalizePrice(rawVal) {
     if (!rawVal) return '';
     const normalized = rawVal
-      .replace(/\s+/g, '')       // usuń spacje
-      .replace(/\u00A0/g, '')    // usuń NBSP
-      .replace(/[^0-9,.-]/g, '') // waluty itp.
-      .replace(/,(?=\d{2}(?!\d))/g, '.'); // przecinek dziesiętny -> kropka
+      .replace(/\s+/g, '')         // remove spaces
+      .replace(/\u00A0/g, '')      // NBSP
+      .replace(/[^0-9,.-]/g, '')    // strip currency
+      .replace(/,(?=\d{2}(?!\d))/g, '.') // decimal comma -> dot (only last two digits)
+    ;
     const num = Number(normalized);
     return Number.isFinite(num) ? num : rawVal;
   }
 
-  // Prezentacja: zawsze 2 miejsca po przecinku, z przecinkiem PL
-  function formatPrice(val){
-    if (val === '' || val == null) return '';
-    const num = typeof val === 'number' ? val : Number(String(val).replace(/\s+/g,'').replace(',', '.'));
-    if (Number.isFinite(num)) {
-      return new Intl.NumberFormat('pl-PL',{minimumFractionDigits:2, maximumFractionDigits:2}).format(num);
-    }
-    // fallback
-    return String(val).replace(/\.(\d{1,2})$/, ',$1');
-  }
-
-  // ===== ADD PRODUCTS =====
   function addProducts() {
     const raw = byId('symbolsInput').value.replace(/\r/g,'');
     if (!raw.trim()) { app.selectedProducts=[]; byId('notFound').textContent=''; renderProducts(); return; }
 
     const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+
     const pasted = lines.map(l => {
       const [symRaw, priceRaw] = splitSymbolPrice(l);
       return { sym: (symRaw||'').trim().toUpperCase(), priceRaw: (priceRaw||'').trim() };
@@ -165,31 +170,18 @@ ABC123	129.99"></textarea>
     renderProducts();
   }
 
-  // ===== RENDER =====
   function renderProducts() {
     const div = byId('productList');
-    if (!app.selectedProducts.length) {
-      div.innerHTML='<div class="text-sm text-gray-500">Brak produktów w ofercie.</div>'; return;
-    }
+    if (!app.selectedProducts.length) { div.innerHTML='<div class="text-sm text-gray-500">Brak produktów w ofercie.</div>'; return; }
     div.innerHTML = app.selectedProducts.map(p => {
-      const priceStr = formatPrice(p.priceNet);
-      const price = priceStr ? `${priceStr} zł` : '';
+      const price = (p.priceNet!==''&&p.priceNet!=null)? `${p.priceNet} zł` : '';
       return `<div class='p-2 border-b flex justify-between'><span><b>${p.symbol}</b> - ${p.name||''}</span><span>${price}</span></div>`;
     }).join('');
   }
 
   function selectedColumnKeys(){ return Object.keys(app.columns).filter(k=>app.columns[k]); }
-  function buildTableData(){
-    const keys = selectedColumnKeys();
-    const head = keys.map(k=>COLUMN_DEFS[k]);
-    const body = app.selectedProducts.map(p => keys.map(k => {
-      if (k==='priceNet' || k==='priceNetNet') return formatPrice(p[k]);
-      return p[k] ?? '';
-    }));
-    return { head, body };
-  }
+  function buildTableData(){ const keys=selectedColumnKeys(); return {head: keys.map(k=>COLUMN_DEFS[k]), body: app.selectedProducts.map(p=>keys.map(k=>p[k]??''))}; }
 
-  // ===== EXPORT =====
   function generatePDF(){
     const { jsPDF } = window.jspdf; const doc = new jsPDF({orientation:'landscape'});
     doc.setFontSize(16); doc.text('Oferta handlowa', 14, 18);
@@ -201,7 +193,7 @@ ABC123	129.99"></textarea>
 
   function generateExcel(){
     const {head, body} = buildTableData();
-    const rows = body.map(r => Object.fromEntries(r.map((v,i)=>[head[i], v]))); // wartości już sformatowane 123,00
+    const rows = body.map(r => Object.fromEntries(r.map((v,i)=>[head[i], v])));
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows, { header: head });
     ws['!cols'] = head.map(h=>({wch: Math.max(12, h.length+2)}));
@@ -209,39 +201,31 @@ ABC123	129.99"></textarea>
     XLSX.writeFile(wb, `Oferta_${app.selectedNetwork||'bez_sieci'}_${yyyymmdd()}.xlsx`);
   }
 
-  // ===== DATA LOADERS =====
   async function loadNetworks(){
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Sieci')}?key=${API_KEY}`;
     const res = await fetch(url); const data = await res.json();
     const [, ...rows] = data.values||[]; const c = byId('networks'); c.innerHTML='';
-    (rows||[]).forEach(r=>{
-      const [id, name, color] = r;
-      const b=document.createElement('button');
-      b.textContent=name||id||'Sieć';
-      b.className='px-4 py-2 rounded-lg border hover:bg-gray-100';
-      b.style.borderColor=color||'#e5e7eb';
-      b.onclick=()=>selectNetwork(name||id, color);
-      c.appendChild(b);
-    });
+    (rows||[]).forEach(r=>{ const [id, name, color] = r; const b=document.createElement('button'); b.textContent=name||id||'Sieć'; b.className='px-4 py-2 rounded-lg border hover:bg-gray-100'; b.style.borderColor=color||'#e5e7eb'; b.onclick=()=>selectNetwork(name||id, color); c.appendChild(b); });
   }
 
-  async function loadProducts(){ // PL-only
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Produkty_PL')}?key=${API_KEY}`;
+  async function loadProducts(lang='PL'){
+    byId('langStatus').textContent='Ładowanie…';
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Produkty_'+lang)}?key=${API_KEY}`;
     const res = await fetch(url); const data = await res.json();
     const [h,...rows] = data.values||[]; if(!rows){ alert('Brak danych produktów'); return; }
     app.products = rows.map(r=>({
-      symbol:r[0]||'', ean:r[1]||'', name:r[2]||'', features:r[3]||'',
-      technical:r[4]||'', complementary:r[5]||'', priceNet:r[6]||'', priceNetNet:r[7]||''
+      symbol:r[0]||'', ean:r[1]||'', name:r[2]||'', features:r[3]||'', technical:r[4]||'', complementary:r[5]||'', priceNet:r[6]||'', priceNetNet:r[7]||''
     }));
+    byId('langStatus').textContent=`Załadowano: ${app.products.length}`;
     app.selectedProducts=[]; renderProducts();
   }
 
-  // ===== INIT =====
   byId('addSymbolsBtn').onclick = addProducts;
   byId('clearBtn').onclick = ()=>{ byId('symbolsInput').value=''; byId('notFound').textContent=''; app.selectedProducts=[]; renderProducts(); };
   byId('pdfBtn').onclick = generatePDF; byId('excelBtn').onclick = generateExcel;
+  byId('langSelect').onchange = (e)=> loadProducts(e.target.value);
 
-  setupColumns(); loadNetworks(); loadProducts();
+  setupColumns(); loadNetworks(); loadProducts('PL');
 </script>
 </body>
 </html>
