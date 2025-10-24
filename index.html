@@ -13,8 +13,6 @@
   <div class="max-w-6xl mx-auto p-6">
     <h1 class="text-3xl font-bold mb-4">📋 Generator Ofert</h1>
 
-    <!-- PL-only (bez wyboru języka) -->
-
     <div class="bg-white p-6 rounded-xl shadow mb-6">
       <h2 class="font-semibold text-lg mb-3">1️⃣ Wybierz sieć</h2>
       <div id="networks" class="flex flex-wrap gap-3"></div>
@@ -28,8 +26,14 @@
 
     <div class="bg-white p-6 rounded-xl shadow mb-6">
       <h2 class="font-semibold text-lg mb-3">3️⃣ Dodaj produkty</h2>
-      <p class="text-sm text-gray-600 mb-2">Kopiuj dwie kolumny z Excela: <b>A = Symbol</b>, <b>B = Cena</b>. Działa <b>TAB</b> (Excel), <b>;</b>, <b>,</b> oraz <b>spacja</b>. Ceny wyświetlane są jako <code>123,00</code>.</p>
-      <textarea id="symbolsInput" class="border w-full rounded-lg p-3 h-32 mb-3" placeholder="Przykład:\nDED6608\t299,00\nABC123\t129.99"></textarea>
+      <p class="text-sm text-gray-600 mb-2">
+        Skopiuj DWIE kolumny z Excela: <b>A = Symbol</b>, <b>B = Cena</b>.
+        Działa <b>TAB</b> (Excel), <b>średnik ;</b>, <b>przecinek ,</b> oraz <b>spacja</b>
+        (np. <code>DED6608 299,00</code>). Ceny prezentowane jako <code>123,00</code>.
+      </p>
+      <textarea id="symbolsInput" class="border w-full rounded-lg p-3 h-32 mb-3" placeholder="Przykład wklejki:
+DED6608	299,00
+ABC123	129.99"></textarea>
       <div class="flex items-center gap-3 mb-3">
         <button id="addSymbolsBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Dodaj produkty</button>
         <button id="clearBtn" class="px-4 py-2 rounded-lg border hover:bg-gray-100">Wyczyść</button>
@@ -46,45 +50,196 @@
       </div>
     </div>
 
-    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v1.4 — PL‑only + ceny 2 miejsca po przecinku</p>
+    <p class="text-center text-gray-500 text-sm mt-8">Generator Ofert v2.0 — PL-only, wklejanie 2 kolumn, ceny 123,00</p>
   </div>
 
 <script>
+  // ===== CONFIG =====
   const SHEET_ID = '1R3CKABzIXSacr6A5nLmf_DZT9RtfdUVBKZTZNgCG4Zo';
-  const API_KEY = 'AIzaSyASZbTomz-sao5jmw9frcWttnS1FvPwky0';
+  const API_KEY  = 'AIzaSyASZbTomz-sao5jmw9frcWttnS1FvPwky0';
 
+  // ===== STATE =====
   const app = {
-    products: [], selectedProducts: [], selectedNetwork: null, offerNumber: '',
-    columns: { symbol:true, ean:true, name:true, features:true, technical:false, complementary:true, priceNet:true, priceNetNet:false }
+    products: [],
+    selectedProducts: [],
+    selectedNetwork: null,
+    offerNumber: '',
+    columns: {
+      symbol: true, ean: true, name: true, features: true,
+      technical: false, complementary: true, priceNet: true, priceNetNet: false,
+    }
   };
 
-  const COLUMN_DEFS = { symbol:'Symbol', ean:'EAN', name:'Nazwa', features:'Cechy', technical:'Dane techniczne', complementary:'Komplementacja', priceNet:'Cena Netto', priceNetNet:'Cena NetNet' };
-  const byId = (id)=>document.getElementById(id);
-  const yyyymmdd = (d=new Date())=>`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const COLUMN_DEFS = {
+    symbol: 'Symbol', ean: 'EAN', name: 'Nazwa', features: 'Cechy',
+    technical: 'Dane techniczne', complementary: 'Komplementacja',
+    priceNet: 'Cena Netto', priceNetNet: 'Cena NetNet'
+  };
 
-  function selectNetwork(name, color){ app.selectedNetwork=name; app.offerNumber=`${name}/1/${yyyymmdd()}`; byId('offerInfo').innerHTML=`Sieć: <b style="color:${color||'#22c55e'}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`; }
+  // ===== HELPERS =====
+  const byId = (id) => document.getElementById(id);
+  const yyyymmdd = (d=new Date()) => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
 
-  function setupColumns(){ const c=byId('columns'); c.innerHTML=''; Object.entries(COLUMN_DEFS).forEach(([k,l])=>{ const d=document.createElement('div'); d.className='flex items-center space-x-2'; d.innerHTML=`<input type="checkbox" id="col_${k}" class="w-4 h-4" ${app.columns[k]?'checked':''}><label for="col_${k}">${l}</label>`; c.appendChild(d); d.querySelector('input').addEventListener('change',e=>app.columns[k]=e.target.checked); }); }
+  function selectNetwork(name, color) {
+    app.selectedNetwork = name;
+    app.offerNumber = `${name}/1/${yyyymmdd()}`;
+    byId('offerInfo').innerHTML =
+      `Sieć: <b style="color:${color||'#22c55e'}">${name}</b><br>Numer oferty: <b>${app.offerNumber}</b>`;
+  }
 
-  // ---------- parser ----------
-  function splitSymbolPrice(line){ const TAB='\t'; if(line.includes(TAB)){ const [a,...r]=line.split(TAB); return [a, r.join(TAB)]; } if(line.includes(';')){ const [a,...r]=line.split(';'); return [a, r.join(';')]; } const m=line.match(/^(\S+)\s+(.+)$/); if(m) return [m[1], m[2]]; if(!/\s/.test(line) && line.includes(',')){ const i=line.indexOf(','); return [line.slice(0,i), line.slice(i+1)]; } return [line,'']; }
-  function normalizePrice(raw){ if(!raw) return ''; const normalized=raw.replace(/\s+/g,'').replace(/\u00A0/g,'').replace(/[^0-9,.-]/g,'').replace(/,(?=\d{2}(?!\d))/g,'.'); const num=Number(normalized); return Number.isFinite(num)? num : raw; }
-  function formatPrice(val){ if(val===''||val==null) return ''; const num= typeof val==='number' ? val : Number(String(val).replace(/\s+/g,'').replace(',', '.')); if(Number.isFinite(num)) return new Intl.NumberFormat('pl-PL',{minimumFractionDigits:2, maximumFractionDigits:2}).format(num); return String(val).replace(/\.(\d{1,2})$/, ',$1'); }
+  function setupColumns() {
+    const c = byId('columns'); c.innerHTML='';
+    Object.entries(COLUMN_DEFS).forEach(([k, label]) => {
+      const div = document.createElement('div');
+      div.className='flex items-center space-x-2';
+      div.innerHTML = `<input type="checkbox" id="col_${k}" class="w-4 h-4" ${app.columns[k]?'checked':''}><label for="col_${k}">${label}</label>`;
+      c.appendChild(div);
+      div.querySelector('input').addEventListener('change', e => app.columns[k]=e.target.checked);
+    });
+  }
 
-  function addProducts(){ const raw=byId('symbolsInput').value.replace(/\r/g,''); if(!raw.trim()){ app.selectedProducts=[]; byId('notFound').textContent=''; renderProducts(); return; } const lines=raw.split('\n').map(l=>l.trim()).filter(Boolean); const pasted=lines.map(l=>{ const [s,p]=splitSymbolPrice(l); return { sym:(s||'').trim().toUpperCase(), priceRaw:(p||'').trim() }; }); const uniqueSyms=Array.from(new Set(pasted.map(p=>p.sym).filter(Boolean))); const priceBySym=new Map(); pasted.forEach(p=>{ if(p.sym&&p.priceRaw) priceBySym.set(p.sym,p.priceRaw); }); const found=[], missing=[]; uniqueSyms.forEach(sym=>{ const hit=app.products.find(p=>(p.symbol||'').toUpperCase()===sym); if(hit){ const cloned={...hit}; if(priceBySym.has(sym)) cloned.priceNet=normalizePrice(priceBySym.get(sym)); found.push(cloned);} else missing.push(sym); }); app.selectedProducts=found; const msg=missing.length? `Nie znaleziono w bazie: ${missing.join(', ')}`:''; byId('notFound').textContent=msg; if(missing.length) alert(msg); renderProducts(); }
+  // ===== PARSING PASTED LINES =====
+  function splitSymbolPrice(line) {
+    const TAB='\t';
+    if (line.includes(TAB)) { const [a,...r]=line.split(TAB); return [a, r.join(TAB)]; }
+    if (line.includes(';')) { const [a,...r]=line.split(';'); return [a, r.join(';')]; }
+    const m = line.match(/^(\S+)\s+(.+)$/);
+    if (m) return [m[1], m[2]];
+    if (!/\s/.test(line) && line.includes(',')) { const i=line.indexOf(','); return [line.slice(0,i), line.slice(i+1)]; }
+    return [line, ''];
+  }
 
-  function renderProducts(){ const div=byId('productList'); if(!app.selectedProducts.length){ div.innerHTML='<div class="text-sm text-gray-500">Brak produktów w ofercie.</div>'; return; } div.innerHTML=app.selectedProducts.map(p=>{ const priceStr=formatPrice(p.priceNet); const price = priceStr? `${priceStr} zł`:''; return `<div class='p-2 border-b flex justify-between'><span><b>${p.symbol}</b> - ${p.name||''}</span><span>${price}</span></div>`; }).join(''); }
+  function normalizePrice(rawVal) {
+    if (!rawVal) return '';
+    const normalized = rawVal
+      .replace(/\s+/g, '')       // usuń spacje
+      .replace(/\u00A0/g, '')    // usuń NBSP
+      .replace(/[^0-9,.-]/g, '') // waluty itp.
+      .replace(/,(?=\d{2}(?!\d))/g, '.'); // przecinek dziesiętny -> kropka
+    const num = Number(normalized);
+    return Number.isFinite(num) ? num : rawVal;
+  }
+
+  // Prezentacja: zawsze 2 miejsca po przecinku, z przecinkiem PL
+  function formatPrice(val){
+    if (val === '' || val == null) return '';
+    const num = typeof val === 'number' ? val : Number(String(val).replace(/\s+/g,'').replace(',', '.'));
+    if (Number.isFinite(num)) {
+      return new Intl.NumberFormat('pl-PL',{minimumFractionDigits:2, maximumFractionDigits:2}).format(num);
+    }
+    // fallback
+    return String(val).replace(/\.(\d{1,2})$/, ',$1');
+  }
+
+  // ===== ADD PRODUCTS =====
+  function addProducts() {
+    const raw = byId('symbolsInput').value.replace(/\r/g,'');
+    if (!raw.trim()) { app.selectedProducts=[]; byId('notFound').textContent=''; renderProducts(); return; }
+
+    const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+    const pasted = lines.map(l => {
+      const [symRaw, priceRaw] = splitSymbolPrice(l);
+      return { sym: (symRaw||'').trim().toUpperCase(), priceRaw: (priceRaw||'').trim() };
+    });
+
+    const uniqueSyms = Array.from(new Set(pasted.map(p=>p.sym).filter(Boolean)));
+    const priceBySym = new Map();
+    pasted.forEach(p => { if (p.sym && p.priceRaw) priceBySym.set(p.sym, p.priceRaw); });
+
+    const found=[], missing=[];
+    uniqueSyms.forEach(sym => {
+      const hit = app.products.find(p => (p.symbol||'').toUpperCase() === sym);
+      if (hit) {
+        const cloned = { ...hit };
+        if (priceBySym.has(sym)) cloned.priceNet = normalizePrice(priceBySym.get(sym));
+        found.push(cloned);
+      } else {
+        missing.push(sym);
+      }
+    });
+
+    app.selectedProducts = found;
+    const msg = missing.length ? `Nie znaleziono w bazie: ${missing.join(', ')}` : '';
+    byId('notFound').textContent = msg;
+    if (missing.length) alert(msg);
+    renderProducts();
+  }
+
+  // ===== RENDER =====
+  function renderProducts() {
+    const div = byId('productList');
+    if (!app.selectedProducts.length) {
+      div.innerHTML='<div class="text-sm text-gray-500">Brak produktów w ofercie.</div>'; return;
+    }
+    div.innerHTML = app.selectedProducts.map(p => {
+      const priceStr = formatPrice(p.priceNet);
+      const price = priceStr ? `${priceStr} zł` : '';
+      return `<div class='p-2 border-b flex justify-between'><span><b>${p.symbol}</b> - ${p.name||''}</span><span>${price}</span></div>`;
+    }).join('');
+  }
 
   function selectedColumnKeys(){ return Object.keys(app.columns).filter(k=>app.columns[k]); }
-  function buildTableData(){ const keys=selectedColumnKeys(); const head=keys.map(k=>COLUMN_DEFS[k]); const body=app.selectedProducts.map(p=>keys.map(k=> (k==='priceNet'||k==='priceNetNet')? formatPrice(p[k]) : (p[k]??''))); return {head, body}; }
+  function buildTableData(){
+    const keys = selectedColumnKeys();
+    const head = keys.map(k=>COLUMN_DEFS[k]);
+    const body = app.selectedProducts.map(p => keys.map(k => {
+      if (k==='priceNet' || k==='priceNetNet') return formatPrice(p[k]);
+      return p[k] ?? '';
+    }));
+    return { head, body };
+  }
 
-  function generatePDF(){ const { jsPDF }=window.jspdf; const doc=new jsPDF({orientation:'landscape'}); doc.setFontSize(16); doc.text('Oferta handlowa',14,18); doc.setFontSize(11); doc.text(`Numer: ${app.offerNumber}`,14,26); doc.text(`Sieć: ${app.selectedNetwork||''}`,14,32); const {head, body}=buildTableData(); doc.autoTable({ head:[head], body, startY:40, styles:{fontSize:9, cellPadding:2}, headStyles:{fillColor:[234,236,239], textColor:33} }); doc.save(`Oferta_${app.selectedNetwork||'bez_sieci'}_${yyyymmdd()}.pdf`); }
-  function generateExcel(){ const {head, body}=buildTableData(); const rows=body.map(r=>Object.fromEntries(r.map((v,i)=>[head[i],v]))); const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows,{header:head}); ws['!cols']=head.map(h=>({wch:Math.max(12,h.length+2)})); XLSX.utils.book_append_sheet(wb, ws, 'Oferta'); XLSX.writeFile(wb, `Oferta_${app.selectedNetwork||'bez_sieci'}_${yyyymmdd()}.xlsx`); }
+  // ===== EXPORT =====
+  function generatePDF(){
+    const { jsPDF } = window.jspdf; const doc = new jsPDF({orientation:'landscape'});
+    doc.setFontSize(16); doc.text('Oferta handlowa', 14, 18);
+    doc.setFontSize(11); doc.text(`Numer: ${app.offerNumber}`,14,26); doc.text(`Sieć: ${app.selectedNetwork||''}`,14,32);
+    const {head, body} = buildTableData();
+    doc.autoTable({ head:[head], body, startY:40, styles:{fontSize:9, cellPadding:2}, headStyles:{fillColor:[234,236,239], textColor:33} });
+    doc.save(`Oferta_${app.selectedNetwork||'bez_sieci'}_${yyyymmdd()}.pdf`);
+  }
 
-  async function loadNetworks(){ const url=`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Sieci')}?key=${API_KEY}`; const res=await fetch(url); const data=await res.json(); const [,...rows]=data.values||[]; const c=byId('networks'); c.innerHTML=''; (rows||[]).forEach(r=>{ const [id,name,color]=r; const b=document.createElement('button'); b.textContent=name||id||'Sieć'; b.className='px-4 py-2 rounded-lg border hover:bg-gray-100'; b.style.borderColor=color||'#e5e7eb'; b.onclick=()=>selectNetwork(name||id,color); c.appendChild(b); }); }
-  async function loadProducts(){ const url=`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Produkty_PL')}?key=${API_KEY}`; const res=await fetch(url); const data=await res.json(); const [h,...rows]=data.values||[]; if(!rows){ alert('Brak danych produktów'); return; } app.products=rows.map(r=>({ symbol:r[0]||'', ean:r[1]||'', name:r[2]||'', features:r[3]||'', technical:r[4]||'', complementary:r[5]||'', priceNet:r[6]||'', priceNetNet:r[7]||'' })); app.selectedProducts=[]; renderProducts(); }
+  function generateExcel(){
+    const {head, body} = buildTableData();
+    const rows = body.map(r => Object.fromEntries(r.map((v,i)=>[head[i], v]))); // wartości już sformatowane 123,00
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows, { header: head });
+    ws['!cols'] = head.map(h=>({wch: Math.max(12, h.length+2)}));
+    XLSX.utils.book_append_sheet(wb, ws, 'Oferta');
+    XLSX.writeFile(wb, `Oferta_${app.selectedNetwork||'bez_sieci'}_${yyyymmdd()}.xlsx`);
+  }
 
-  byId('addSymbolsBtn').onclick=addProducts; byId('clearBtn').onclick=()=>{ byId('symbolsInput').value=''; byId('notFound').textContent=''; app.selectedProducts=[]; renderProducts(); }; byId('pdfBtn').onclick=generatePDF; byId('excelBtn').onclick=generateExcel;
+  // ===== DATA LOADERS =====
+  async function loadNetworks(){
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Sieci')}?key=${API_KEY}`;
+    const res = await fetch(url); const data = await res.json();
+    const [, ...rows] = data.values||[]; const c = byId('networks'); c.innerHTML='';
+    (rows||[]).forEach(r=>{
+      const [id, name, color] = r;
+      const b=document.createElement('button');
+      b.textContent=name||id||'Sieć';
+      b.className='px-4 py-2 rounded-lg border hover:bg-gray-100';
+      b.style.borderColor=color||'#e5e7eb';
+      b.onclick=()=>selectNetwork(name||id, color);
+      c.appendChild(b);
+    });
+  }
+
+  async function loadProducts(){ // PL-only
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Produkty_PL')}?key=${API_KEY}`;
+    const res = await fetch(url); const data = await res.json();
+    const [h,...rows] = data.values||[]; if(!rows){ alert('Brak danych produktów'); return; }
+    app.products = rows.map(r=>({
+      symbol:r[0]||'', ean:r[1]||'', name:r[2]||'', features:r[3]||'',
+      technical:r[4]||'', complementary:r[5]||'', priceNet:r[6]||'', priceNetNet:r[7]||''
+    }));
+    app.selectedProducts=[]; renderProducts();
+  }
+
+  // ===== INIT =====
+  byId('addSymbolsBtn').onclick = addProducts;
+  byId('clearBtn').onclick = ()=>{ byId('symbolsInput').value=''; byId('notFound').textContent=''; app.selectedProducts=[]; renderProducts(); };
+  byId('pdfBtn').onclick = generatePDF; byId('excelBtn').onclick = generateExcel;
 
   setupColumns(); loadNetworks(); loadProducts();
 </script>
